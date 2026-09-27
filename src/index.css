@@ -1,0 +1,72 @@
+@import "tailwindcss";
+
+/* Custom styles for the chess game */
+body {
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* Chess piece styling */
+.chess-piece {
+  user-select: none;
+  -webkit-user-select: none;
+  cursor: grab;
+}
+
+.chess-piece:active {
+  cursor: grabbing;
+}
+
+/* Board square hover effect */
+.board-square:hover {
+  filter: brightness(1.1);
+}
+
+/* Eval bar animation */
+.eval-bar-fill {
+  transition: height 0.5s ease-out;
+}
+
+/* Timer pulse animation */
+@keyframes timer-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.5; }
+}
+
+.timer-critical {
+  animation: timer-pulse 0.5s ease-in-out infinite;
+}
+
+/* Card hover effect */
+.commander-card {
+  transition: all 0.2s ease;
+}
+
+.commander-card:hover:not(:disabled) {
+  transform: translateY(-1px);
+}
+
+/* Scrollbar styling */
+::-webkit-scrollbar {
+  width: 4px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: #4a5568;
+  border-radius: 2px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: #718096;
+}
+
+/* Writing mode for vertical text */
+.writing-mode-vertical {
+  writing-mode: vertical-rl;
+  text-orientation: mixed;
+}
