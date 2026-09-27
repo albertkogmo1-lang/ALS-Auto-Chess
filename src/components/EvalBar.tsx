@@ -8,6 +8,10 @@ interface EvalBarProps {
 }
 
 export const EvalBar: React.FC<EvalBarProps> = ({ eval: evalCp, label, locked = false }) => {
+  // Convert eval to percentage (clamp between 0 and 100)
+  const normalized = Math.max(-1000, Math.min(1000, evalCp));
+  const whitePercent = locked ? 50 : 50 + (normalized / 1000) * 45; // 50/50 when locked
+
   if (locked) {
     return (
       <div className="flex flex-col items-center h-full">
@@ -15,17 +19,17 @@ export const EvalBar: React.FC<EvalBarProps> = ({ eval: evalCp, label, locked = 
           {label}
         </div>
         <div className="relative w-6 flex-1 bg-gray-800 rounded-full overflow-hidden border border-gray-600">
-          <div className="absolute inset-0 flex items-center justify-center">
-            <span className="text-[9px] text-gray-500">🔒</span>
+          {/* Show neutral 50/50 bar when locked */}
+          <div className="absolute bottom-0 w-full bg-gray-900" style={{ height: '50%' }} />
+          <div className="absolute top-0 w-full bg-white/50" style={{ height: '50%' }} />
+          <div className="absolute top-1/2 w-full h-px bg-gray-500" />
+          <div className="absolute inset-0 flex items-center justify-center bg-black/50">
+            <span className="text-[9px] text-gray-400">🔒</span>
           </div>
         </div>
       </div>
     );
   }
-
-  // Convert eval to percentage (clamp between 0 and 100)
-  const normalized = Math.max(-1000, Math.min(1000, evalCp));
-  const whitePercent = 50 + (normalized / 1000) * 45;
 
   return (
     <div className="flex flex-col items-center h-full">

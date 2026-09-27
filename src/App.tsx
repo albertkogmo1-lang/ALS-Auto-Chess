@@ -59,7 +59,7 @@ export default function App() {
   const [connectionStatus, setConnectionStatus] = useState<'idle' | 'waiting' | 'connected' | 'error'>('idle');
   const [selectedPiece, setSelectedPiece] = useState<PieceType | null>(null);
   const [currentEval, setCurrentEval] = useState(0);
-  const [evalLabel, setEvalLabel] = useState('Your Formation');
+  const [evalLabel, setEvalLabel] = useState('Locked');
   const [lastMove, setLastMove] = useState<{ from: string; to: string } | null>(null);
   const [isGenerating, setIsGenerating] = useState(false);
   
@@ -111,9 +111,14 @@ export default function App() {
       case 'game-state':
         // Full state sync from host (guest receives this)
         if (myRole === 'guest') {
+          console.log('Guest received full game state:', msg.data.phase, 'round:', msg.data.round);
           store.setState(msg.data);
           if (msg.data.guestColor) {
             setMyColor(msg.data.guestColor);
+          }
+          // Ensure Guest exits lobby state
+          if (msg.data.phase && msg.data.phase !== 'LOBBY') {
+            setConnectionStatus('connected');
           }
         }
         break;
@@ -166,12 +171,9 @@ export default function App() {
         if (msg.data.blackPlacement) store.setPlacement('b', msg.data.blackPlacement);
         if (msg.data.fen) {
           store.setCurrentFen(msg.data.fen);
-          try {
-            const chess = new Chess(msg.data.fen);
-            setCurrentEval(evaluatePosition(chess));
-          } catch {}
+          // Don't set eval during reveal - bar should remain locked
         }
-        setEvalLabel('Match Eval');
+        // Keep label as 'Locked' until AUTO_PLAY starts
         break;
       
       case 'move':
@@ -301,11 +303,17 @@ export default function App() {
       whitePlacement: store.whitePlacement,
       blackPlacement: store.blackPlacement,
     });
+    sendToPeer('phase-change', { phase: 'PAWN_REVEAL' });
     
     setTimeout(() => {
       store.setPhase('PIECE_PLACEMENT_50');
       store.startTimer(50);
       sendToPeer('phase-change', { phase: 'PIECE_PLACEMENT_50', timer: 50 });
+      // Send full state to ensure Guest is in sync
+      sendToPeer('game-state', {
+        ...useGameStore.getState(),
+        guestColor: myRole === 'host' ? 'b' : 'w',
+      });
     }, 2000);
   };
 
@@ -350,17 +358,20 @@ export default function App() {
       blackPlacement: store.blackPlacement,
       fen,
     });
+    sendToPeer('phase-change', { phase: 'FULL_REVEAL' });
     
-    try {
-      const chess = new Chess(fen);
-      setCurrentEval(evaluatePosition(chess));
-    } catch {}
-    setEvalLabel('Match Eval');
+    // Don't set eval yet - bar should remain locked until AUTO_PLAY
+    setEvalLabel('Locked');
     
     setTimeout(() => {
       store.setPhase('COMMANDER_DRAFT_12');
       store.startTimer(12);
       sendToPeer('phase-change', { phase: 'COMMANDER_DRAFT_12', timer: 12 });
+      // Send full state to ensure Guest is in sync
+      sendToPeer('game-state', {
+        ...useGameStore.getState(),
+        guestColor: myRole === 'host' ? 'b' : 'w',
+      });
     }, 2500);
   };
 
@@ -451,6 +462,7 @@ export default function App() {
     
     store.setPhase('AUTO_PLAY');
     setEvalLabel('Match Eval');
+    setCurrentEval(0); // Initialize to 0 when auto-play starts
     sendToPeer('phase-change', { phase: 'AUTO_PLAY' });
     
     const whiteCmdId = store.whiteCommanderPick || 'novice';
@@ -859,8 +871,8 @@ export default function App() {
             {/* Board with eval bar */}
             <div className="flex gap-2 items-stretch">
               <EvalBar 
-                eval={currentEval} 
-                label={evalLabel} 
+                eval={store.phase === 'AUTO_PLAY' || store.phase === 'ROUND_RESULT' ? currentEval : 0} 
+                label={store.phase === 'AUTO_PLAY' || store.phase === 'ROUND_RESULT' ? 'Match Eval' : 'Locked'}
                 locked={store.phase !== 'AUTO_PLAY' && store.phase !== 'ROUND_RESULT'}
               />
               <div className="flex flex-col items-center">
