@@ -67,24 +67,11 @@ export const Board: React.FC<BoardProps> = ({
     }
   }
 
+  // Spec: any empty square inside the deployment zone is legal.
   const isLegalPlacement = useCallback((square: string): boolean => {
     if (!placementColor || !interactive || !selectedPiece) return false;
     if (!isInZone(square, placementColor)) return false;
     if (occupiedSquares?.has(square)) return false;
-    
-    // Check piece-specific restrictions
-    const rank = parseInt(square[1]);
-    if (selectedPiece === 'p') {
-      // Pawns: White on ranks 2-4, Black on ranks 5-7
-      if (placementColor === 'w' && (rank < 2 || rank > 4)) return false;
-      if (placementColor === 'b' && (rank < 5 || rank > 7)) return false;
-    }
-    if (selectedPiece === 'k') {
-      // Kings: White not on rank 4, Black not on rank 5
-      if (placementColor === 'w' && rank === 4) return false;
-      if (placementColor === 'b' && rank === 5) return false;
-    }
-    
     return true;
   }, [placementColor, interactive, selectedPiece, occupiedSquares]);
 

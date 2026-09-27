@@ -15,8 +15,11 @@ import { adjudicatePosition, adjudicateMoveCap } from './rules/adjudication';
 import { getEngineMove } from './engine/fallback-engine';
 import { getCommanderById, COMMANDERS, Commander } from './engine/commanders';
 import { evaluatePosition } from './engine/heuristic';
-import { isInZone, isValidPawnSquare, isValidKingSquare } from './rules/placement';
+import { isInZone } from './rules/placement';
 import { initEngine, getMoveForCommander, getEval, isStockfishAvailable } from './engine/stockfish';
+import { createGameFromPlacement } from './rules/validation';
+import { calculateCumulativeEval } from './rules/adjudication';
+import { formatEval } from './engine/heuristic';
 
 const MOVE_CAP = 150;
 
@@ -171,9 +174,13 @@ export default function App() {
         if (msg.data.blackPlacement) store.setPlacement('b', msg.data.blackPlacement);
         if (msg.data.fen) {
           store.setCurrentFen(msg.data.fen);
-          // Don't set eval during reveal - bar should remain locked
+          // Spec: eval bar unlocks at FULL_REVEAL with heuristic "Formation" read
+          try {
+            const chess = new Chess(msg.data.fen);
+            setEvalLabel('Formation');
+            setCurrentEval(evaluatePosition(chess));
+          } catch {}
         }
-        // Keep label as 'Locked' until AUTO_PLAY starts
         break;
       
       case 'move':
@@ -191,7 +198,7 @@ export default function App() {
         break;
       
       case 'match-result':
-        store.setPhase('MATCH_RESULT');
+        store.setPhase(msg.data.tie ? 'TIEBREAK' : 'MATCH_RESULT');
         break;
     }
   };
@@ -348,20 +355,32 @@ export default function App() {
       store.setPlacement('b', [...store.blackPlacement, ...autoPlaced]);
     }
     
-    // Full reveal
+    // Full reveal - use createGameFromPlacement to handle illegal positions
     store.setPhase('FULL_REVEAL');
-    const fen = buildFenFromPlacement(store.whitePlacement, store.blackPlacement, true);
-    store.setCurrentFen(fen);
+    const game = createGameFromPlacement(store.whitePlacement, store.blackPlacement);
+    if (!game) {
+      console.error('Failed to create game from placement');
+      return;
+    }
+    
+    // Update placements if king was relocated
+    if (game.white !== store.whitePlacement || game.black !== store.blackPlacement) {
+      store.setPlacement('w', game.white);
+      store.setPlacement('b', game.black);
+    }
+    
+    store.setCurrentFen(game.fen);
     
     sendToPeer('reveal', {
-      whitePlacement: store.whitePlacement,
-      blackPlacement: store.blackPlacement,
-      fen,
+      whitePlacement: game.white,
+      blackPlacement: game.black,
+      fen: game.fen,
     });
     sendToPeer('phase-change', { phase: 'FULL_REVEAL' });
     
-    // Don't set eval yet - bar should remain locked until AUTO_PLAY
-    setEvalLabel('Locked');
+    // Spec: eval bar unlocks at FULL_REVEAL with heuristic "Formation" read
+    setEvalLabel('Formation');
+    setCurrentEval(evaluatePosition(game.chess));
     
     setTimeout(() => {
       store.setPhase('COMMANDER_DRAFT_12');
@@ -411,10 +430,9 @@ export default function App() {
   const handlePlacePiece = (piece: PieceType, square: string) => {
     const placement = myColor === 'w' ? store.whitePlacement : store.blackPlacement;
     
+    // Spec: any empty square inside the deployment zone is legal.
     if (!isInZone(square, myColor)) return;
     if (placement.some(p => p.square === square)) return;
-    if (piece === 'p' && !isValidPawnSquare(square, myColor)) return;
-    if (piece === 'k' && !isValidKingSquare(square, myColor)) return;
     
     const counts: Record<PieceType, number> = { p: 0, r: 0, n: 0, b: 0, q: 0, k: 0 };
     for (const p of placement) counts[p.type]++;
@@ -480,10 +498,14 @@ export default function App() {
     newUsed[blackPlayerKey] = [...newUsed[blackPlayerKey], blackCmdId];
     store.setState({ usedCommanders: newUsed });
     
-    const fen = store.currentFen;
-    if (!fen) return;
+    // Use createGameFromPlacement to ensure we have a legal position
+    const game = createGameFromPlacement(store.whitePlacement, store.blackPlacement);
+    if (!game) {
+      console.error('Failed to create game for auto-play');
+      return;
+    }
     
-    const chess = new Chess(fen);
+    const chess = game.chess;
     chessRef.current = chess;
     movesRef.current = [];
     setIsGenerating(true);
@@ -590,9 +612,10 @@ export default function App() {
     if (store.round >= 5) {
       if (store.scores.playerA === store.scores.playerB) {
         store.setPhase('TIEBREAK');
+        sendToPeer('match-result', { tie: true });
       } else {
         store.setPhase('MATCH_RESULT');
-        sendToPeer('match-result', {});
+        sendToPeer('match-result', { tie: false });
       }
     } else {
       store.nextRound();
@@ -737,6 +760,53 @@ export default function App() {
     );
   }
 
+  // ===== TIEBREAK =====
+  if (store.phase === 'TIEBREAK') {
+    const cumulative = calculateCumulativeEval(store.roundResults);
+    const playerAWins = cumulative.playerA > cumulative.playerB;
+    const iWon = (myRole === 'host' && playerAWins) || (myRole === 'guest' && !playerAWins);
+    
+    return (
+      <div className="min-h-screen bg-gradient-to-br from-gray-900 via-gray-800 to-purple-900 flex items-center justify-center p-4">
+        <div className="text-center max-w-md w-full">
+          <div className="text-7xl mb-4">⚖️</div>
+          <h1 className="text-4xl font-bold text-white mb-2">Match Tied!</h1>
+          <p className="text-gray-400 mb-6">Score: {store.scores.playerA} — {store.scores.playerB}</p>
+          
+          <div className="bg-gray-800/60 rounded-xl p-6 mb-6 border border-purple-500">
+            <h2 className="text-xl font-bold text-white mb-4">Tiebreak: Cumulative Eval</h2>
+            <div className="space-y-3">
+              <div className="flex justify-between items-center">
+                <span className="text-gray-300">Player A:</span>
+                <span className={`text-xl font-bold ${playerAWins ? 'text-green-400' : 'text-gray-400'}`}>
+                  {formatEval(cumulative.playerA)}
+                </span>
+              </div>
+              <div className="flex justify-between items-center">
+                <span className="text-gray-300">Player B:</span>
+                <span className={`text-xl font-bold ${!playerAWins ? 'text-green-400' : 'text-gray-400'}`}>
+                  {formatEval(cumulative.playerB)}
+                </span>
+              </div>
+            </div>
+            <div className="mt-4 pt-4 border-t border-gray-700">
+              <div className={`text-2xl font-bold ${iWon ? 'text-green-400' : 'text-red-400'}`}>
+                {iWon ? '🏆 You Win!' : '😔 You Lose'}
+              </div>
+            </div>
+          </div>
+          
+          <button
+            onClick={() => window.location.reload()}
+            className="px-8 py-3 bg-purple-600 hover:bg-purple-500 text-white font-bold rounded-lg"
+          >
+            New Match
+          </button>
+        </div>
+      </div>
+    );
+  }
+
   // ===== MATCH RESULT =====
   if (store.phase === 'MATCH_RESULT') {
     const winner = store.scores.playerA > store.scores.playerB ? 'Player A' : 'Player B';
@@ -849,7 +919,21 @@ export default function App() {
                 </div>
               )}
               {store.phase === 'COMMANDER_DRAFT_12' && (
-                <div className="text-sm text-green-400 font-medium">⚔ Draft your Commander!</div>
+                <div>
+                  {store.whiteCommanderPick && store.blackCommanderPick ? (
+                    <div className="bg-indigo-900/50 border border-indigo-500 rounded-lg p-3 animate-pulse">
+                      <div className="text-xs text-indigo-300 mb-1">⚔ Commanders Locked In!</div>
+                      <div className="text-sm font-bold text-white">
+                        {getCommanderById(store.whiteCommanderPick)?.icon} {getCommanderById(store.whiteCommanderPick)?.name}
+                        {' vs '}
+                        {getCommanderById(store.blackCommanderPick)?.icon} {getCommanderById(store.blackCommanderPick)?.name}
+                      </div>
+                      <div className="text-xs text-indigo-300 mt-1">Starting battle in 3 seconds...</div>
+                    </div>
+                  ) : (
+                    <div className="text-sm text-green-400 font-medium">⚔ Draft your Commander!</div>
+                  )}
+                </div>
               )}
               {store.phase === 'AUTO_PLAY' && (
                 <div className="text-xs sm:text-sm text-blue-400 font-medium">
@@ -871,9 +955,9 @@ export default function App() {
             {/* Board with eval bar */}
             <div className="flex gap-2 items-stretch">
               <EvalBar 
-                eval={store.phase === 'AUTO_PLAY' || store.phase === 'ROUND_RESULT' ? currentEval : 0} 
-                label={store.phase === 'AUTO_PLAY' || store.phase === 'ROUND_RESULT' ? 'Match Eval' : 'Locked'}
-                locked={store.phase !== 'AUTO_PLAY' && store.phase !== 'ROUND_RESULT'}
+                eval={currentEval} 
+                label={evalLabel}
+                locked={store.phase !== 'FULL_REVEAL' && store.phase !== 'COMMANDER_DRAFT_12' && store.phase !== 'AUTO_PLAY' && store.phase !== 'ROUND_RESULT'}
               />
               <div className="flex flex-col items-center">
                 <Board

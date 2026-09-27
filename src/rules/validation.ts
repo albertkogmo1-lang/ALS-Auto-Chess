@@ -99,9 +99,6 @@ export function autoPlacePieces(
         if (occupiedSquares.has(sq)) continue;
         if (placed.some(p => p.square === sq)) continue;
         
-        if (type === 'p' && !isValidPawnPlacement(sq, color)) continue;
-        if (type === 'k' && !isValidKingPlacement(sq, color)) continue;
-        
         available.push(sq);
       }
     }
@@ -115,14 +112,57 @@ export function autoPlacePieces(
   return placed;
 }
 
-function isValidPawnPlacement(square: string, color: Color): boolean {
-  const rank = parseInt(square[1]);
-  if (color === 'w') return rank >= 2 && rank <= 4;
-  return rank >= 5 && rank <= 7;
+export interface ResolvedGame {
+  chess: Chess;
+  fen: string;
+  white: PlacedPiece[];
+  black: PlacedPiece[];
 }
 
-function isValidKingPlacement(square: string, color: Color): boolean {
-  const rank = parseInt(square[1]);
-  if (color === 'w') return rank >= 1 && rank <= 3;
-  return rank >= 6 && rank <= 8;
+// Turn an arbitrary (spec-legal) placement into a playable chess position.
+// Blind placements can produce positions chess.js rejects - most commonly
+// kings on adjacent squares, or the side NOT to move being in check.
+// Strategy: try White to move, then Black to move; if still illegal,
+// deterministically relocate Black's king to the first square (scanned
+// a1->h8) that produces a legal position.
+export function createGameFromPlacement(white: PlacedPiece[], black: PlacedPiece[]): ResolvedGame | null {
+  const tryBuild = (w: PlacedPiece[], b: PlacedPiece[]): ResolvedGame | null => {
+    const base = buildFenFromPlacement(w, b, true);
+    for (const turn of ['w', 'b']) {
+      const parts = base.split(' ');
+      parts[1] = turn;
+      const fen = parts.join(' ');
+      try {
+        return { chess: new Chess(fen), fen, white: w, black: b };
+      } catch {
+        // try the other side to move
+      }
+    }
+    return null;
+  };
+
+  const direct = tryBuild(white, black);
+  if (direct) return direct;
+
+  const kingIdx = black.findIndex(p => p.type === 'k');
+  if (kingIdx >= 0) {
+    const original = black[kingIdx].square;
+    for (let rank = 1; rank <= 8; rank++) {
+      for (const file of 'abcdefgh') {
+        const sq = `${file}${rank}`;
+        if (sq === original) continue;
+        if (white.some(p => p.square === sq)) continue;
+        if (black.some((p, i) => i !== kingIdx && p.square === sq)) continue;
+        const moved = black.map((p, i) => (i === kingIdx ? { ...p, square: sq } : p));
+        const resolved = tryBuild(white, moved);
+        if (resolved) {
+          console.warn(`Position illegal as placed; Black king relocated ${original} -> ${sq}`);
+          return resolved;
+        }
+      }
+    }
+  }
+
+  console.error('Could not legalize placement - no valid king relocation found');
+  return null;
 }

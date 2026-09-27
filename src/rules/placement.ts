@@ -1,31 +1,9 @@
 import { PlacedPiece, PieceType, Color } from '../state/machine';
 
-export function isValidPawnSquare(square: string, color: Color): boolean {
-  const file = square[0];
-  const rank = parseInt(square[1]);
-  
-  if (file < 'a' || file > 'h') return false;
-  
-  if (color === 'w') {
-    // White pawns: ranks 2-4
-    return rank >= 2 && rank <= 4;
-  } else {
-    // Black pawns: ranks 5-7
-    return rank >= 5 && rank <= 7;
-  }
-}
-
-export function isValidKingSquare(square: string, color: Color): boolean {
-  const rank = parseInt(square[1]);
-  
-  if (color === 'w') {
-    // White king: NOT on rank 4
-    return rank >= 1 && rank <= 3;
-  } else {
-    // Black king: NOT on rank 5
-    return rank >= 6 && rank <= 8;
-  }
-}
+// Per the design spec: "each player places all 8 pawns anywhere in their own
+// zone" and pieces go "into their zone's remaining empty squares".
+// There are NO rank restrictions - any empty square inside the deployment
+// zone is legal. (An earlier draft restricted pawn/king ranks; removed.)
 
 export function isInZone(square: string, color: Color): boolean {
   const rank = parseInt(square[1]);
@@ -42,34 +20,20 @@ export function validatePlacement(
   phase: 'pawns' | 'pieces'
 ): { valid: boolean; error?: string } {
   const occupiedSquares = new Set<string>();
-  
+
   for (const piece of pieces) {
     // Check zone
     if (!isInZone(piece.square, color)) {
       return { valid: false, error: `${piece.square} is outside your deployment zone` };
     }
-    
+
     // Check duplicate squares
     if (occupiedSquares.has(piece.square)) {
       return { valid: false, error: `Duplicate placement on ${piece.square}` };
     }
     occupiedSquares.add(piece.square);
-    
-    // Check pawn restrictions
-    if (piece.type === 'p') {
-      if (!isValidPawnSquare(piece.square, color)) {
-        return { valid: false, error: `Pawns cannot be placed on rank ${piece.square[1]} for ${color === 'w' ? 'White' : 'Black'}` };
-      }
-    }
-    
-    // Check king restrictions
-    if (piece.type === 'k') {
-      if (!isValidKingSquare(piece.square, color)) {
-        return { valid: false, error: `King cannot be placed on rank ${piece.square[1]} for ${color === 'w' ? 'White' : 'Black'}` };
-      }
-    }
   }
-  
+
   // Check piece counts
   if (phase === 'pawns') {
     const pawnCount = pieces.filter(p => p.type === 'p').length;
@@ -85,7 +49,7 @@ export function validatePlacement(
     if (counts.q > 1) return { valid: false, error: 'Too many queens' };
     if (counts.k > 1) return { valid: false, error: 'Too many kings' };
   }
-  
+
   return { valid: true };
 }
 
@@ -96,24 +60,18 @@ export function getAvailableSquares(
 ): string[] {
   const squares: string[] = [];
   const files = 'abcdefgh';
-  
+
   const rankStart = color === 'w' ? 1 : 5;
   const rankEnd = color === 'w' ? 4 : 8;
-  
+
   for (let rank = rankStart; rank <= rankEnd; rank++) {
     for (const file of files) {
       const sq = `${file}${rank}`;
       if (!occupiedSquares.has(sq)) {
-        if (phase === 'pawns') {
-          if (isValidPawnSquare(sq, color)) {
-            squares.push(sq);
-          }
-        } else {
-          squares.push(sq);
-        }
+        squares.push(sq);
       }
     }
   }
-  
+
   return squares;
 }
