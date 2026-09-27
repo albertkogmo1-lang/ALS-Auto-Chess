@@ -586,11 +586,11 @@ export default function App() {
                     onChange={(e) => setJoinCode(e.target.value.toUpperCase())}
                     placeholder="Enter room code"
                     className="flex-1 px-4 py-3 bg-gray-800 border border-gray-700 rounded-lg text-white placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-indigo-500"
-                    maxLength={6}
+                    maxLength={5}
                   />
                   <button
                     onClick={handleJoinRoom}
-                    disabled={joinCode.length !== 6}
+                    disabled={joinCode.length !== 5}
                     className="px-6 py-3 bg-green-600 hover:bg-green-500 disabled:bg-gray-700 disabled:cursor-not-allowed text-white font-bold rounded-lg transition-colors"
                   >
                     Join
