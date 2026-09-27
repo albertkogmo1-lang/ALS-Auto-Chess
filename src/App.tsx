@@ -46,6 +46,7 @@ export default function App() {
   const [evalLabel, setEvalLabel] = useState('Your Formation');
   const [lastMove, setLastMove] = useState<{ from: string; to: string } | null>(null);
   const [waitingForOther, setWaitingForOther] = useState(false);
+  const [isGenerating, setIsGenerating] = useState(false);
   const phaseHandledRef = useRef(false);
 
   // Start match
@@ -234,14 +235,16 @@ export default function App() {
     setCurrentEval(eval_);
   }, [activePlayer, store]);
 
-  // Refs for lazy move generation
+  // Refs for auto-play
   const chessRef = useRef<Chess | null>(null);
   const whiteCmdRef = useRef<ReturnType<typeof getCommanderById> | null>(null);
   const blackCmdRef = useRef<ReturnType<typeof getCommanderById> | null>(null);
-  const plyCountRef = useRef(0);
-  const generatingRef = useRef(false);
+  const movesRef = useRef<{ from: string; to: string; san: string; fen: string; eval: number }[]>([]);
+  const evalHistoryRef = useRef<number[]>([]);
+  const isGeneratingRef = useRef(false);
+  const genTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  // Start auto-play - sets up refs, generates moves lazily
+  // Start auto-play - generate moves in background
   const startAutoPlay = useCallback(() => {
     setShowBlocker(false);
     setWaitingForOther(false);
@@ -267,111 +270,141 @@ export default function App() {
     const fen = store.currentFen;
     if (!fen) return;
     
-    // Initialize refs for lazy generation
-    chessRef.current = new Chess(fen);
+    // Initialize chess game
+    const chess = new Chess(fen);
+    chessRef.current = chess;
     whiteCmdRef.current = whiteCmd;
     blackCmdRef.current = blackCmd;
-    plyCountRef.current = 0;
-    generatingRef.current = true;
     
-    // Clear previous moves
+    // Initialize refs
+    movesRef.current = [];
+    evalHistoryRef.current = [evaluatePosition(chess)];
+    isGeneratingRef.current = true;
+    setIsGenerating(true);
+    
+    // Clear store
     store.setAutoPlayMoves([]);
-    store.setEvalHistory([evaluatePosition(chessRef.current)]);
+    store.setEvalHistory([evaluatePosition(chess)]);
     store.setAutoPlayIndex(0);
     store.setIsAutoPlaying(true);
-  }, [store]);
-
-  // Generate next move lazily (non-blocking)
-  useEffect(() => {
-    if (!store.isAutoPlaying || !generatingRef.current || !chessRef.current) return;
-    if (!whiteCmdRef.current || !blackCmdRef.current) return;
     
-    const chess = chessRef.current;
-    
-    // Check if game is over or move cap reached
-    if (chess.isGameOver() || plyCountRef.current >= MOVE_CAP) {
-      generatingRef.current = false;
-      // Finish the round
-      let result: RoundResult;
-      const adjudication = adjudicatePosition(chess);
-      if (adjudication) {
-        result = {
-          round: store.round,
-          winner: adjudication.winner,
-          reason: adjudication.reason,
-          whiteCommanderId: store.whiteCommanderPick || 'novice',
-          blackCommanderId: store.blackCommanderPick || 'novice',
-          evalGraph: store.evalHistory,
-          finalEval: adjudication.eval,
-        };
-      } else {
-        const capResult = adjudicateMoveCap(chess.fen());
-        result = {
-          round: store.round,
-          winner: capResult.winner,
-          reason: capResult.reason,
-          whiteCommanderId: store.whiteCommanderPick || 'novice',
-          blackCommanderId: store.blackCommanderPick || 'novice',
-          evalGraph: store.evalHistory,
-          finalEval: capResult.eval,
-        };
+    // Generate moves one at a time with yielding
+    const generateNextMove = () => {
+      if (!chessRef.current || !whiteCmdRef.current || !blackCmdRef.current) {
+        isGeneratingRef.current = false;
+        return;
       }
-      store.addRoundResult(result);
-      store.setPhase('ROUND_RESULT');
-      return;
-    }
-
-    // Generate next move in a setTimeout to avoid blocking
-    const timer = setTimeout(() => {
-      if (!chessRef.current || !whiteCmdRef.current || !blackCmdRef.current) return;
       
+      const chess = chessRef.current;
+      
+      // Check termination
+      if (chess.isGameOver() || movesRef.current.length >= MOVE_CAP) {
+        isGeneratingRef.current = false;
+        setIsGenerating(false);
+        // Final update
+        store.setAutoPlayMoves([...movesRef.current]);
+        store.setEvalHistory([...evalHistoryRef.current]);
+        return;
+      }
+      
+      // Generate one move
       const currentCmd = chess.turn() === 'w' ? whiteCmdRef.current : blackCmdRef.current;
       try {
-        const result = getEngineMove(chess.fen(), currentCmd, plyCountRef.current);
+        const result = getEngineMove(chess.fen(), currentCmd, movesRef.current.length);
         const move = chess.move(result.move.san);
         if (move) {
-          const newMove = {
+          movesRef.current.push({
             from: move.from,
             to: move.to,
             san: move.san,
             fen: chess.fen(),
             eval: result.eval,
-          };
-          store.setState({ 
-            autoPlayMoves: [...store.autoPlayMoves, newMove],
-            evalHistory: [...store.evalHistory, result.eval]
           });
-          plyCountRef.current++;
+          evalHistoryRef.current.push(result.eval);
+          
+          // Update store immediately
+          store.setAutoPlayMoves([...movesRef.current]);
+          store.setEvalHistory([...evalHistoryRef.current]);
+          
+          // Schedule next move with delay to yield to UI
+          genTimerRef.current = setTimeout(generateNextMove, 100);
         } else {
-          generatingRef.current = false;
+          isGeneratingRef.current = false;
+          setIsGenerating(false);
+          store.setAutoPlayMoves([...movesRef.current]);
+          store.setEvalHistory([...evalHistoryRef.current]);
         }
-      } catch {
-        generatingRef.current = false;
+      } catch (e) {
+        console.error('Error generating move:', e);
+        isGeneratingRef.current = false;
+        setIsGenerating(false);
+        store.setAutoPlayMoves([...movesRef.current]);
+        store.setEvalHistory([...evalHistoryRef.current]);
       }
-    }, 50); // Small delay to yield to UI
+    };
+    
+    // Start generation after a brief delay
+    genTimerRef.current = setTimeout(generateNextMove, 300);
+  }, [store]);
 
-    return () => clearTimeout(timer);
-  }, [store.isAutoPlaying, store.autoPlayMoves.length]);
+  // Cleanup on unmount
+  useEffect(() => {
+    return () => {
+      if (genTimerRef.current) {
+        clearTimeout(genTimerRef.current);
+      }
+    };
+  }, []);
 
   // Animate moves as they become available
   useEffect(() => {
     if (!store.isAutoPlaying) return;
+    
+    // Check if we've played all available moves
     if (store.autoPlayIndex >= store.autoPlayMoves.length) {
-      // Wait for more moves to be generated, or game is over
-      if (!generatingRef.current) {
-        // Generation complete and all moves played - finish handled above
-        store.setIsAutoPlaying(false);
+      // If generation is complete, finish the round
+      if (!isGeneratingRef.current && store.autoPlayMoves.length > 0) {
+        const chess = chessRef.current;
+        if (chess) {
+          let result: RoundResult;
+          const adjudication = adjudicatePosition(chess);
+          if (adjudication) {
+            result = {
+              round: store.round,
+              winner: adjudication.winner,
+              reason: adjudication.reason,
+              whiteCommanderId: store.whiteCommanderPick || 'novice',
+              blackCommanderId: store.blackCommanderPick || 'novice',
+              evalGraph: store.evalHistory,
+              finalEval: adjudication.eval,
+            };
+          } else {
+            const capResult = adjudicateMoveCap(chess.fen());
+            result = {
+              round: store.round,
+              winner: capResult.winner,
+              reason: capResult.reason,
+              whiteCommanderId: store.whiteCommanderPick || 'novice',
+              blackCommanderId: store.blackCommanderPick || 'novice',
+              evalGraph: store.evalHistory,
+              finalEval: capResult.eval,
+            };
+          }
+          store.addRoundResult(result);
+          store.setPhase('ROUND_RESULT');
+        }
       }
       return;
     }
 
+    // Play next move
     const move = store.autoPlayMoves[store.autoPlayIndex];
     const timer = setTimeout(() => {
       store.setCurrentFen(move.fen);
       setCurrentEval(move.eval);
       setLastMove({ from: move.from, to: move.to });
       store.setAutoPlayIndex(store.autoPlayIndex + 1);
-    }, 600);
+    }, 500);
 
     return () => clearTimeout(timer);
   }, [store.isAutoPlaying, store.autoPlayIndex, store.autoPlayMoves.length]);
@@ -708,7 +741,11 @@ export default function App() {
                   )}
                   {store.phase === 'AUTO_PLAY' && (
                     <div className="text-xs sm:text-sm text-blue-400 font-medium">
-                      🤖 Battle in progress — Move {Math.min(store.autoPlayIndex + 1, store.autoPlayMoves.length)}/{store.autoPlayMoves.length}
+                      {isGenerating ? (
+                        <>⚙️ Preparing battle... ({store.autoPlayMoves.length} moves computed)</>
+                      ) : (
+                        <>🤖 Move {Math.min(store.autoPlayIndex + 1, store.autoPlayMoves.length)} of {store.autoPlayMoves.length}</>
+                      )}
                     </div>
                   )}
                   {(store.phase === 'FULL_REVEAL' || store.phase === 'PAWN_REVEAL') && (
