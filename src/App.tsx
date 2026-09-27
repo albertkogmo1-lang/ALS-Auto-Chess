@@ -697,6 +697,30 @@ export default function App() {
   return (
     <div className="min-h-screen bg-gradient-to-br from-gray-900 via-gray-800 to-indigo-900 p-2 sm:p-4">
       <div className="max-w-6xl mx-auto">
+        {/* Start Match Button for Host */}
+        {myRole === 'host' && store.round === 0 && (
+          <div className="mb-4 p-6 bg-gradient-to-r from-green-900/40 to-emerald-900/40 border-2 border-green-500 rounded-xl text-center">
+            <div className="text-4xl mb-2">⚔️</div>
+            <h2 className="text-2xl font-bold text-white mb-2">Ready to Battle?</h2>
+            <p className="text-gray-300 mb-4">Both players are connected. Start the match when ready!</p>
+            <button
+              onClick={handleStartMatch}
+              className="px-12 py-4 bg-green-600 hover:bg-green-500 text-white text-xl font-bold rounded-xl transition-all transform hover:scale-105 shadow-lg shadow-green-500/30"
+            >
+              🎮 Start Match
+            </button>
+          </div>
+        )}
+
+        {/* Waiting message for Guest */}
+        {myRole === 'guest' && store.round === 0 && (
+          <div className="mb-4 p-6 bg-gradient-to-r from-blue-900/40 to-indigo-900/40 border-2 border-blue-500 rounded-xl text-center">
+            <div className="text-4xl mb-2 animate-pulse">⏳</div>
+            <h2 className="text-2xl font-bold text-white mb-2">Waiting for Host...</h2>
+            <p className="text-gray-300">The host will start the match when ready.</p>
+          </div>
+        )}
+
         {/* Header */}
         <div className="flex items-center justify-between mb-3">
           <div>
