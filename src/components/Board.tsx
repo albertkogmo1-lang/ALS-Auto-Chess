@@ -114,7 +114,7 @@ export const Board: React.FC<BoardProps> = ({
       >
         {piece && (
           <span 
-            className={`text-2xl sm:text-3xl md:text-4xl select-none transition-transform duration-100 ${
+            className={`text-3xl sm:text-4xl md:text-5xl select-none transition-transform duration-100 ${
               isHighlighted ? 'scale-110' : ''
             }`}
             style={{ 
@@ -153,7 +153,7 @@ export const Board: React.FC<BoardProps> = ({
   return (
     <div 
       className="grid grid-cols-8 border-2 border-amber-950 rounded-lg shadow-2xl overflow-hidden"
-      style={{ maxWidth: 'min(480px, calc(100vw - 100px))', width: '100%' }}
+      style={{ maxWidth: 'min(600px, calc(100vw - 80px))', width: '100%' }}
     >
       {Array.from({ length: 8 }, (_, row) =>
         Array.from({ length: 8 }, (_, col) => renderSquare(row, col))

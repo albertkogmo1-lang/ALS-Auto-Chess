@@ -82,6 +82,7 @@ export default function App() {
       
       case 'placement':
         // Opponent's placement (for reveal)
+        console.log('Received placement:', msg.data.color, msg.data.pieces.length, 'pieces');
         if (msg.data.color === 'w') {
           store.setPlacement('w', msg.data.pieces);
         } else {
@@ -94,6 +95,17 @@ export default function App() {
           store.setCommanderPick('w', msg.data.commanderId);
         } else {
           store.setCommanderPick('b', msg.data.commanderId);
+        }
+        // Host: check if both picked after receiving guest's pick
+        if (myRole === 'host') {
+          setTimeout(() => {
+            const state = useGameStore.getState();
+            console.log('After guest pick - commanders:', state.whiteCommanderPick, state.blackCommanderPick);
+            if (state.whiteCommanderPick && state.blackCommanderPick) {
+              console.log('Both commanders picked, starting auto-play');
+              startAutoPlay();
+            }
+          }, 300);
         }
         break;
       
@@ -360,17 +372,19 @@ export default function App() {
     if (myColor === 'w') store.setPlacement('w', newPlacement);
     else store.setPlacement('b', newPlacement);
     
-    // Send to peer
+    // Send to peer (host only sends to guest, guest sends to host)
     sendToPeer('placement', { color: myColor, pieces: newPlacement });
     
-    // Update eval
-    setEvalLabel('Your Formation');
-    const pieceValues: Record<string, number> = { p: 100, n: 320, b: 330, r: 500, q: 900, k: 0 };
-    let eval_ = 0;
-    for (const p of newPlacement) {
-      eval_ += myColor === 'w' ? (pieceValues[p.type] || 0) : -(pieceValues[p.type] || 0);
+    // Update eval (only show during placement)
+    if (isPlacingPhase) {
+      setEvalLabel('Your Formation');
+      const pieceValues: Record<string, number> = { p: 100, n: 320, b: 330, r: 500, q: 900, k: 0 };
+      let eval_ = 0;
+      for (const p of newPlacement) {
+        eval_ += myColor === 'w' ? (pieceValues[p.type] || 0) : -(pieceValues[p.type] || 0);
+      }
+      setCurrentEval(eval_);
     }
-    setCurrentEval(eval_);
   };
 
   // Handle commander pick
@@ -378,10 +392,16 @@ export default function App() {
     store.setCommanderPick(myColor, commanderId);
     sendToPeer('commander-pick', { color: myColor, commanderId });
     
-    // Check if both picked
-    const state = useGameStore.getState();
-    if (state.whiteCommanderPick && state.blackCommanderPick) {
-      startAutoPlay();
+    // Host checks if both picked after a short delay (to allow message sync)
+    if (myRole === 'host') {
+      setTimeout(() => {
+        const state = useGameStore.getState();
+        console.log('Commander picks:', state.whiteCommanderPick, state.blackCommanderPick);
+        if (state.whiteCommanderPick && state.blackCommanderPick) {
+          console.log('Both commanders picked, starting auto-play');
+          startAutoPlay();
+        }
+      }, 500);
     }
   };
 
@@ -801,11 +821,11 @@ export default function App() {
               {store.phase === 'AUTO_PLAY' && <EvalBar eval={currentEval} label={evalLabel} />}
               <div className="flex flex-col items-center">
                 <Board
-                  fen={store.phase === 'AUTO_PLAY' ? store.currentFen : undefined}
+                  fen={store.phase === 'AUTO_PLAY' || store.phase === 'ROUND_RESULT' ? store.currentFen : undefined}
                   placement={
                     isPlacingPhase 
                       ? (myColor === 'w' ? store.whitePlacement : store.blackPlacement)
-                      : (store.phase === 'FULL_REVEAL' || store.phase === 'PAWN_REVEAL')
+                      : (store.phase === 'FULL_REVEAL' || store.phase === 'PAWN_REVEAL' || store.phase === 'COMMANDER_DRAFT_12')
                         ? [...store.whitePlacement, ...store.blackPlacement]
                         : undefined
                   }
@@ -817,7 +837,7 @@ export default function App() {
                   occupiedSquares={
                     isPlacingPhase 
                       ? new Set((myColor === 'w' ? store.whitePlacement : store.blackPlacement).map(p => p.square))
-                      : (store.phase === 'FULL_REVEAL' || store.phase === 'PAWN_REVEAL')
+                      : (store.phase === 'FULL_REVEAL' || store.phase === 'PAWN_REVEAL' || store.phase === 'COMMANDER_DRAFT_12')
                         ? new Set([...store.whitePlacement, ...store.blackPlacement].map(p => p.square))
                         : undefined
                   }
