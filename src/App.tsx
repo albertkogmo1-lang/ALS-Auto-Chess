@@ -234,7 +234,14 @@ export default function App() {
     setCurrentEval(eval_);
   }, [activePlayer, store]);
 
-  // Start auto-play
+  // Refs for lazy move generation
+  const chessRef = useRef<Chess | null>(null);
+  const whiteCmdRef = useRef<ReturnType<typeof getCommanderById> | null>(null);
+  const blackCmdRef = useRef<ReturnType<typeof getCommanderById> | null>(null);
+  const plyCountRef = useRef(0);
+  const generatingRef = useRef(false);
+
+  // Start auto-play - sets up refs, generates moves lazily
   const startAutoPlay = useCallback(() => {
     setShowBlocker(false);
     setWaitingForOther(false);
@@ -257,41 +264,117 @@ export default function App() {
     newUsed[blackPlayerKey] = [...newUsed[blackPlayerKey], blackCmdId];
     store.setState({ usedCommanders: newUsed });
     
-    // Generate all moves
     const fen = store.currentFen;
     if (!fen) return;
     
-    const chess = new Chess(fen);
-    const moves: { from: string; to: string; san: string; fen: string; eval: number }[] = [];
-    const evalGraph: number[] = [evaluatePosition(chess)];
+    // Initialize refs for lazy generation
+    chessRef.current = new Chess(fen);
+    whiteCmdRef.current = whiteCmd;
+    blackCmdRef.current = blackCmd;
+    plyCountRef.current = 0;
+    generatingRef.current = true;
     
-    let plyCount = 0;
-    while (!chess.isGameOver() && plyCount < MOVE_CAP) {
-      const currentCmd = chess.turn() === 'w' ? whiteCmd : blackCmd;
+    // Clear previous moves
+    store.setAutoPlayMoves([]);
+    store.setEvalHistory([evaluatePosition(chessRef.current)]);
+    store.setAutoPlayIndex(0);
+    store.setIsAutoPlaying(true);
+  }, [store]);
+
+  // Generate next move lazily (non-blocking)
+  useEffect(() => {
+    if (!store.isAutoPlaying || !generatingRef.current || !chessRef.current) return;
+    if (!whiteCmdRef.current || !blackCmdRef.current) return;
+    
+    const chess = chessRef.current;
+    
+    // Check if game is over or move cap reached
+    if (chess.isGameOver() || plyCountRef.current >= MOVE_CAP) {
+      generatingRef.current = false;
+      // Finish the round
+      let result: RoundResult;
+      const adjudication = adjudicatePosition(chess);
+      if (adjudication) {
+        result = {
+          round: store.round,
+          winner: adjudication.winner,
+          reason: adjudication.reason,
+          whiteCommanderId: store.whiteCommanderPick || 'novice',
+          blackCommanderId: store.blackCommanderPick || 'novice',
+          evalGraph: store.evalHistory,
+          finalEval: adjudication.eval,
+        };
+      } else {
+        const capResult = adjudicateMoveCap(chess.fen());
+        result = {
+          round: store.round,
+          winner: capResult.winner,
+          reason: capResult.reason,
+          whiteCommanderId: store.whiteCommanderPick || 'novice',
+          blackCommanderId: store.blackCommanderPick || 'novice',
+          evalGraph: store.evalHistory,
+          finalEval: capResult.eval,
+        };
+      }
+      store.addRoundResult(result);
+      store.setPhase('ROUND_RESULT');
+      return;
+    }
+
+    // Generate next move in a setTimeout to avoid blocking
+    const timer = setTimeout(() => {
+      if (!chessRef.current || !whiteCmdRef.current || !blackCmdRef.current) return;
+      
+      const currentCmd = chess.turn() === 'w' ? whiteCmdRef.current : blackCmdRef.current;
       try {
-        const result = getEngineMove(chess.fen(), currentCmd, plyCount);
+        const result = getEngineMove(chess.fen(), currentCmd, plyCountRef.current);
         const move = chess.move(result.move.san);
         if (move) {
-          moves.push({
+          const newMove = {
             from: move.from,
             to: move.to,
             san: move.san,
             fen: chess.fen(),
             eval: result.eval,
+          };
+          store.setState({ 
+            autoPlayMoves: [...store.autoPlayMoves, newMove],
+            evalHistory: [...store.evalHistory, result.eval]
           });
-          evalGraph.push(result.eval);
-        } else break;
+          plyCountRef.current++;
+        } else {
+          generatingRef.current = false;
+        }
       } catch {
-        break;
+        generatingRef.current = false;
       }
-      plyCount++;
+    }, 50); // Small delay to yield to UI
+
+    return () => clearTimeout(timer);
+  }, [store.isAutoPlaying, store.autoPlayMoves.length]);
+
+  // Animate moves as they become available
+  useEffect(() => {
+    if (!store.isAutoPlaying) return;
+    if (store.autoPlayIndex >= store.autoPlayMoves.length) {
+      // Wait for more moves to be generated, or game is over
+      if (!generatingRef.current) {
+        // Generation complete and all moves played - finish handled above
+        store.setIsAutoPlaying(false);
+      }
+      return;
     }
-    
-    store.setAutoPlayMoves(moves);
-    store.setEvalHistory(evalGraph);
-    store.setAutoPlayIndex(0);
-    store.setIsAutoPlaying(true);
-  }, [store]);
+
+    const move = store.autoPlayMoves[store.autoPlayIndex];
+    const timer = setTimeout(() => {
+      store.setCurrentFen(move.fen);
+      setCurrentEval(move.eval);
+      setLastMove({ from: move.from, to: move.to });
+      store.setAutoPlayIndex(store.autoPlayIndex + 1);
+    }, 600);
+
+    return () => clearTimeout(timer);
+  }, [store.isAutoPlaying, store.autoPlayIndex, store.autoPlayMoves.length]);
 
   // Handle commander pick
   const handleCommanderPick = useCallback((commanderId: string, player: 'A' | 'B') => {
@@ -355,56 +438,6 @@ export default function App() {
       }
     }, 500);
   }, [store, startAutoPlay]);
-
-  // Auto-play animation
-  useEffect(() => {
-    if (!store.isAutoPlaying) return;
-    if (store.autoPlayIndex >= store.autoPlayMoves.length) {
-      store.setIsAutoPlaying(false);
-      // Finish round
-      const chess = new Chess(store.currentFen);
-      let result: RoundResult;
-      
-      const adjudication = adjudicatePosition(chess);
-      if (adjudication) {
-        result = {
-          round: store.round,
-          winner: adjudication.winner,
-          reason: adjudication.reason,
-          whiteCommanderId: store.whiteCommanderPick || 'novice',
-          blackCommanderId: store.blackCommanderPick || 'novice',
-          evalGraph: store.evalHistory,
-          finalEval: adjudication.eval,
-        };
-      } else {
-        const capResult = adjudicateMoveCap(store.currentFen);
-        result = {
-          round: store.round,
-          winner: capResult.winner,
-          reason: capResult.reason,
-          whiteCommanderId: store.whiteCommanderPick || 'novice',
-          blackCommanderId: store.blackCommanderPick || 'novice',
-          evalGraph: store.evalHistory,
-          finalEval: capResult.eval,
-        };
-      }
-      
-      store.addRoundResult(result);
-      store.setPhase('ROUND_RESULT');
-      return;
-    }
-
-    const move = store.autoPlayMoves[store.autoPlayIndex];
-    const timer = setTimeout(() => {
-      store.setCurrentFen(move.fen);
-      store.addEvalPoint(move.eval);
-      setCurrentEval(move.eval);
-      setLastMove({ from: move.from, to: move.to });
-      store.setAutoPlayIndex(store.autoPlayIndex + 1);
-    }, 700);
-
-    return () => clearTimeout(timer);
-  }, [store.isAutoPlaying, store.autoPlayIndex]);
 
   // Handle continue after round result
   const handleContinue = () => {
