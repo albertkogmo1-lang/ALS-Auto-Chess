@@ -43,6 +43,8 @@ export const Board: React.FC<BoardProps> = ({
   // Build piece map
   const pieceMap = new Map<string, string>();
 
+  console.log('Board render - fen:', fen, 'placement:', placement);
+
   if (fen) {
     try {
       const chess = new Chess(fen);
@@ -52,7 +54,8 @@ export const Board: React.FC<BoardProps> = ({
           const sq = board[row][col];
           if (sq) {
             const square = coordsToSquare(row, col);
-            pieceMap.set(square, sq.color === 'w' ? sq.type.toUpperCase() : sq.type.toLowerCase());
+            const key = sq.color === 'w' ? `w${sq.type.toUpperCase()}` : `b${sq.type.toLowerCase()}`;
+            pieceMap.set(square, key);
           }
         }
       }
@@ -61,10 +64,12 @@ export const Board: React.FC<BoardProps> = ({
 
   if (placement) {
     for (const p of placement) {
-      const key = p.color === 'w' ? p.type.toUpperCase() : p.type.toLowerCase();
+      const key = p.color === 'w' ? `w${p.type.toUpperCase()}` : `b${p.type.toLowerCase()}`;
       pieceMap.set(p.square, key);
     }
   }
+
+  console.log('Board pieceMap:', pieceMap);
 
   const isLegalPlacement = useCallback((square: string): boolean => {
     if (!placementColor || !interactive || !selectedPiece) return false;

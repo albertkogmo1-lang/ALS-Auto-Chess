@@ -356,18 +356,37 @@ export default function App() {
   const handlePlacePiece = (piece: PieceType, square: string) => {
     const placement = myColor === 'w' ? store.whitePlacement : store.blackPlacement;
     
-    if (!isInZone(square, myColor)) return;
-    if (placement.some(p => p.square === square)) return;
-    if (piece === 'p' && !isValidPawnSquare(square, myColor)) return;
-    if (piece === 'k' && !isValidKingSquare(square, myColor)) return;
+    console.log('Attempting to place:', piece, 'at', square, 'Current placement:', placement);
+    
+    if (!isInZone(square, myColor)) {
+      console.log('Invalid zone');
+      return;
+    }
+    if (placement.some(p => p.square === square)) {
+      console.log('Square already occupied');
+      return;
+    }
+    if (piece === 'p' && !isValidPawnSquare(square, myColor)) {
+      console.log('Invalid pawn square');
+      return;
+    }
+    if (piece === 'k' && !isValidKingSquare(square, myColor)) {
+      console.log('Invalid king square');
+      return;
+    }
     
     const counts: Record<PieceType, number> = { p: 0, r: 0, n: 0, b: 0, q: 0, k: 0 };
     for (const p of placement) counts[p.type]++;
     const maxCounts: Record<PieceType, number> = { p: 8, r: 2, n: 2, b: 2, q: 1, k: 1 };
-    if (counts[piece] >= maxCounts[piece]) return;
+    if (counts[piece] >= maxCounts[piece]) {
+      console.log('Max pieces reached for', piece);
+      return;
+    }
     
     const newPiece: PlacedPiece = { type: piece, square, color: myColor };
     const newPlacement = [...placement, newPiece];
+    
+    console.log('Placing piece, new placement:', newPlacement);
     
     if (myColor === 'w') store.setPlacement('w', newPlacement);
     else store.setPlacement('b', newPlacement);
@@ -825,7 +844,7 @@ export default function App() {
                   placement={
                     isPlacingPhase 
                       ? (myColor === 'w' ? store.whitePlacement : store.blackPlacement)
-                      : (store.phase === 'FULL_REVEAL' || store.phase === 'PAWN_REVEAL' || store.phase === 'COMMANDER_DRAFT_12')
+                      : (store.phase === 'FULL_REVEAL' || store.phase === 'PAWN_REVEAL' || store.phase === 'COMMANDER_DRAFT_12' || store.phase === 'AUTO_PLAY')
                         ? [...store.whitePlacement, ...store.blackPlacement]
                         : undefined
                   }
@@ -837,7 +856,7 @@ export default function App() {
                   occupiedSquares={
                     isPlacingPhase 
                       ? new Set((myColor === 'w' ? store.whitePlacement : store.blackPlacement).map(p => p.square))
-                      : (store.phase === 'FULL_REVEAL' || store.phase === 'PAWN_REVEAL' || store.phase === 'COMMANDER_DRAFT_12')
+                      : (store.phase === 'FULL_REVEAL' || store.phase === 'PAWN_REVEAL' || store.phase === 'COMMANDER_DRAFT_12' || store.phase === 'AUTO_PLAY')
                         ? new Set([...store.whitePlacement, ...store.blackPlacement].map(p => p.square))
                         : undefined
                   }
