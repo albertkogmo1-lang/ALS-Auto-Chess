@@ -42,7 +42,8 @@ const PEER_CONFIG = {
 export function createRoom(): Promise<string> {
   return new Promise((resolve, reject) => {
     const roomCode = generateRoomCode();
-    const peerId = `rda-host-${roomCode}-${Date.now().toString(36)}`;
+    // Use room code directly as peer ID for simplicity
+    const peerId = `rda-${roomCode}`;
     
     console.log('Creating room with peer ID:', peerId);
     
@@ -80,8 +81,6 @@ export function createRoom(): Promise<string> {
         createRoom().then(resolve).catch(reject);
       } else if (err.type === 'network' || err.type === 'server-error') {
         reject(new Error('Network error. The signaling server may be temporarily unavailable. Please try again in a moment.'));
-      } else if (err.type === 'peer-unavailable') {
-        reject(new Error('Room not found. Check the code and try again.'));
       } else {
         reject(new Error(`Connection failed: ${err.message || err.type}`));
       }
@@ -98,9 +97,10 @@ export function createRoom(): Promise<string> {
 
 export function joinRoom(roomCode: string): Promise<void> {
   return new Promise((resolve, reject) => {
-    const guestId = `rda-guest-${generateRoomCode()}-${Date.now().toString(36)}`;
+    const guestId = `rda-guest-${generateRoomCode()}`;
+    const hostPeerId = `rda-${roomCode}`;
     
-    console.log('Joining room:', roomCode, 'as', guestId);
+    console.log('Joining room:', roomCode, 'connecting to', hostPeerId);
     
     try {
       peer = new Peer(guestId, PEER_CONFIG);
@@ -115,54 +115,26 @@ export function joinRoom(roomCode: string): Promise<void> {
     }, 15000);
 
     peer.on('open', () => {
-      console.log('Guest peer opened, searching for host...');
+      console.log('Guest peer opened, connecting to host...');
       
-      // Try to find the host - the peer ID starts with rda-host-{code}
-      // We need to search for matching peers
-      // Since we can't list peers, we try connecting with timestamp variants
-      const tryConnect = (attempt: number) => {
-        if (attempt > 20) {
-          clearTimeout(timeout);
-          reject(new Error('Could not find the host room. Make sure the code is correct and the host is waiting.'));
-          return;
-        }
-        
-        // Try different timestamp suffixes (host created within last ~10 minutes)
-        const now = Date.now();
-        const timestamps: string[] = [];
-        for (let i = 0; i < 5; i++) {
-          timestamps.push((now - i * 60000).toString(36));
-        }
-        
-        let found = false;
-        for (const ts of timestamps) {
-          const hostPeerId = `rda-host-${roomCode}-${ts}`;
-          console.log(`Attempt ${attempt}: trying ${hostPeerId}`);
-          
-          const connection = peer!.connect(hostPeerId, {
-            reliable: true,
-            serialization: 'json',
-          });
+      const connection = peer!.connect(hostPeerId, {
+        reliable: true,
+        serialization: 'json',
+      });
 
-          connection.on('open', () => {
-            clearTimeout(timeout);
-            console.log('Connected to host!');
-            conn = connection;
-            setupConnection(connection);
-            resolve();
-          });
+      connection.on('open', () => {
+        clearTimeout(timeout);
+        console.log('Connected to host!');
+        conn = connection;
+        setupConnection(connection);
+        resolve();
+      });
 
-          connection.on('error', (err) => {
-            // This peer ID didn't work, try next
-            console.log(`Failed: ${hostPeerId}`);
-          });
-        }
-        
-        // Retry after a delay
-        setTimeout(() => tryConnect(attempt + 1), 1500);
-      };
-      
-      tryConnect(0);
+      connection.on('error', (err) => {
+        clearTimeout(timeout);
+        console.error('Connection error:', err);
+        reject(new Error('Failed to connect to host. Make sure the room code is correct and the host is waiting.'));
+      });
     });
 
     peer.on('error', (err) => {
