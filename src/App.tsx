@@ -798,17 +798,29 @@ export default function App() {
 
             {/* Board with eval bar */}
             <div className="flex gap-2 items-stretch">
-              <EvalBar eval={currentEval} label={evalLabel} />
+              {store.phase === 'AUTO_PLAY' && <EvalBar eval={currentEval} label={evalLabel} />}
               <div className="flex flex-col items-center">
                 <Board
-                  fen={store.currentFen || undefined}
-                  placement={isPlacingPhase ? (myColor === 'w' ? store.whitePlacement : store.blackPlacement) : undefined}
+                  fen={store.phase === 'AUTO_PLAY' ? store.currentFen : undefined}
+                  placement={
+                    isPlacingPhase 
+                      ? (myColor === 'w' ? store.whitePlacement : store.blackPlacement)
+                      : (store.phase === 'FULL_REVEAL' || store.phase === 'PAWN_REVEAL')
+                        ? [...store.whitePlacement, ...store.blackPlacement]
+                        : undefined
+                  }
                   placementColor={isPlacingPhase ? myColor : undefined}
                   placementPhase={isPlacingPhase ? (store.phase === 'PAWN_PLACEMENT_30' ? 'pawns' : 'pieces') : undefined}
                   onPlacePiece={isPlacingPhase ? handlePlacePiece : undefined}
                   selectedPiece={isPlacingPhase ? selectedPiece : undefined}
                   highlightZone={isPlacingPhase ? myColor : undefined}
-                  occupiedSquares={isPlacingPhase ? new Set((myColor === 'w' ? store.whitePlacement : store.blackPlacement).map(p => p.square)) : undefined}
+                  occupiedSquares={
+                    isPlacingPhase 
+                      ? new Set((myColor === 'w' ? store.whitePlacement : store.blackPlacement).map(p => p.square))
+                      : (store.phase === 'FULL_REVEAL' || store.phase === 'PAWN_REVEAL')
+                        ? new Set([...store.whitePlacement, ...store.blackPlacement].map(p => p.square))
+                        : undefined
+                  }
                   lastMove={lastMove}
                   flipped={myColor === 'b'}
                   interactive={isPlacingPhase}
