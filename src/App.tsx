@@ -13,11 +13,42 @@ import { RoundRecap } from './components/RoundRecap';
 import { buildFenFromPlacement, autoPlacePieces } from './rules/validation';
 import { adjudicatePosition, adjudicateMoveCap } from './rules/adjudication';
 import { getEngineMove } from './engine/fallback-engine';
-import { getCommanderById, COMMANDERS } from './engine/commanders';
+import { getCommanderById, COMMANDERS, Commander } from './engine/commanders';
 import { evaluatePosition } from './engine/heuristic';
 import { isInZone, isValidPawnSquare, isValidKingSquare } from './rules/placement';
+import { initEngine, getMoveForCommander, getEval, isStockfishAvailable } from './engine/stockfish';
 
 const MOVE_CAP = 150;
+
+// Choose move based on commander's blunder rate
+async function chooseMove(chess: Chess, commander: Commander): Promise<{ san: string; eval: number }> {
+  // Check for blunder
+  if (Math.random() < commander.blunderRate) {
+    const moves = chess.moves({ verbose: true });
+    if (moves.length > 0) {
+      const randomMove = moves[Math.floor(Math.random() * moves.length)];
+      return { san: randomMove.san, eval: evaluatePosition(chess) };
+    }
+  }
+  
+  // Try Stockfish first
+  if (isStockfishAvailable()) {
+    try {
+      const bestMove = await getMoveForCommander(chess.fen(), commander);
+      const move = chess.move(bestMove);
+      if (move) {
+        const eval_ = await getEval(chess.fen(), Math.min(commander.depth, 12));
+        return { san: move.san, eval: eval_ };
+      }
+    } catch (error) {
+      console.warn('Stockfish failed, using fallback engine', error);
+    }
+  }
+  
+  // Fallback to custom engine
+  const result = getEngineMove(chess.fen(), commander, 0);
+  return { san: result.move.san, eval: result.eval };
+}
 
 export default function App() {
   const store = useGameStore();
@@ -48,6 +79,13 @@ export default function App() {
 
     Peer.onDisconnect(() => {
       setConnectionStatus('error');
+    });
+
+    // Initialize Stockfish engine
+    initEngine().then(() => {
+      console.log('Stockfish engine ready:', isStockfishAvailable());
+    }).catch((err) => {
+      console.warn('Stockfish initialization failed, using fallback engine:', err);
     });
 
     return () => {
@@ -245,7 +283,7 @@ export default function App() {
     if (whitePawns.length < 8) {
       const occupied = new Set(store.whitePlacement.map(p => p.square));
       const needed = PAWN_PIECES.slice(whitePawns.length);
-      const autoPlaced = autoPlacePieces(needed, 'w', 'pawns', occupied, Date.now());
+      const autoPlaced = autoPlacePieces(needed, 'w', 'pawns', occupied, store.matchSeed, store.round);
       store.setPlacement('w', [...store.whitePlacement, ...autoPlaced]);
     }
     
@@ -253,7 +291,7 @@ export default function App() {
     if (blackPawns.length < 8) {
       const occupied = new Set(store.blackPlacement.map(p => p.square));
       const needed = PAWN_PIECES.slice(blackPawns.length);
-      const autoPlaced = autoPlacePieces(needed, 'b', 'pawns', occupied, Date.now() + 1000);
+      const autoPlaced = autoPlacePieces(needed, 'b', 'pawns', occupied, store.matchSeed, store.round);
       store.setPlacement('b', [...store.blackPlacement, ...autoPlaced]);
     }
     
@@ -285,7 +323,7 @@ export default function App() {
     }
     if (whiteNeeded.length > 0) {
       const occupied = new Set(store.whitePlacement.map(p => p.square));
-      const autoPlaced = autoPlacePieces(whiteNeeded, 'w', 'pieces', occupied, Date.now());
+      const autoPlaced = autoPlacePieces(whiteNeeded, 'w', 'pieces', occupied, store.matchSeed, store.round);
       store.setPlacement('w', [...store.whitePlacement, ...autoPlaced]);
     }
     
@@ -298,7 +336,7 @@ export default function App() {
     }
     if (blackNeeded.length > 0) {
       const occupied = new Set(store.blackPlacement.map(p => p.square));
-      const autoPlaced = autoPlacePieces(blackNeeded, 'b', 'pieces', occupied, Date.now() + 1000);
+      const autoPlaced = autoPlacePieces(blackNeeded, 'b', 'pieces', occupied, store.matchSeed, store.round);
       store.setPlacement('b', [...store.blackPlacement, ...autoPlaced]);
     }
     
@@ -444,7 +482,7 @@ export default function App() {
     store.setIsAutoPlaying(true);
     
     // Generate moves
-    const generateNextMove = () => {
+    const generateNextMove = async () => {
       if (!chessRef.current || !whiteCmd || !blackCmd) {
         setIsGenerating(false);
         return;
@@ -458,8 +496,8 @@ export default function App() {
       
       const currentCmd = chess.turn() === 'w' ? whiteCmd : blackCmd;
       try {
-        const result = getEngineMove(chess.fen(), currentCmd, movesRef.current.length);
-        const move = chess.move(result.move.san);
+        const result = await chooseMove(chess, currentCmd);
+        const move = chess.move(result.san);
         if (move) {
           const moveData = {
             from: move.from,

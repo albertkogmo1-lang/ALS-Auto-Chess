@@ -1,5 +1,6 @@
 import { Chess } from 'chess.js';
 import { PlacedPiece, Color, PieceType } from '../state/machine';
+import { rngFor } from '../net/seeded-rng';
 
 export function buildFenFromPlacement(
   whitePieces: PlacedPiece[],
@@ -78,18 +79,16 @@ export function autoPlacePieces(
   color: Color,
   phase: 'pawns' | 'pieces',
   occupiedSquares: Set<string>,
-  seed: number
+  seed: string,
+  round: number = 1
 ): PlacedPiece[] {
   const placed: PlacedPiece[] = [];
   const files = 'abcdefgh';
   const rankStart = color === 'w' ? 1 : 5;
   const rankEnd = color === 'w' ? 4 : 8;
   
-  let currentSeed = seed;
-  const nextRand = () => {
-    currentSeed = (currentSeed * 1103515245 + 12345) & 0x7fffffff;
-    return currentSeed / 0x7fffffff;
-  };
+  // Use seeded RNG
+  const rng = rngFor(seed, round, `auto-place-${color}-${phase}`);
   
   for (const type of remainingTypes) {
     // Find available squares
@@ -108,7 +107,7 @@ export function autoPlacePieces(
     }
     
     if (available.length > 0) {
-      const idx = Math.floor(nextRand() * available.length);
+      const idx = Math.floor(rng() * available.length);
       placed.push({ type, square: available[idx], color });
     }
   }
