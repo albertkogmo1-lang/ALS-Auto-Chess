@@ -82,7 +82,6 @@ export default function App() {
       
       case 'placement':
         // Opponent's placement (for reveal)
-        console.log('Received placement:', msg.data.color, msg.data.pieces.length, 'pieces');
         if (msg.data.color === 'w') {
           store.setPlacement('w', msg.data.pieces);
         } else {
@@ -102,7 +101,14 @@ export default function App() {
             const state = useGameStore.getState();
             console.log('After guest pick - commanders:', state.whiteCommanderPick, state.blackCommanderPick);
             if (state.whiteCommanderPick && state.blackCommanderPick) {
-              console.log('Both commanders picked, starting auto-play');
+              console.log('Both commanders picked, building FEN and starting auto-play');
+              // Build FEN from placement if not already built
+              if (!state.currentFen) {
+                const fen = buildFenFromPlacement(state.whitePlacement, state.blackPlacement, true);
+                store.setCurrentFen(fen);
+                sendToPeer('reveal', { fen });
+                console.log('Built FEN:', fen);
+              }
               startAutoPlay();
             }
           }, 300);
@@ -356,54 +362,24 @@ export default function App() {
   const handlePlacePiece = (piece: PieceType, square: string) => {
     const placement = myColor === 'w' ? store.whitePlacement : store.blackPlacement;
     
-    console.log('Attempting to place:', piece, 'at', square, 'Current placement:', placement);
-    
-    if (!isInZone(square, myColor)) {
-      console.log('Invalid zone');
-      return;
-    }
-    if (placement.some(p => p.square === square)) {
-      console.log('Square already occupied');
-      return;
-    }
-    if (piece === 'p' && !isValidPawnSquare(square, myColor)) {
-      console.log('Invalid pawn square');
-      return;
-    }
-    if (piece === 'k' && !isValidKingSquare(square, myColor)) {
-      console.log('Invalid king square');
-      return;
-    }
+    if (!isInZone(square, myColor)) return;
+    if (placement.some(p => p.square === square)) return;
+    if (piece === 'p' && !isValidPawnSquare(square, myColor)) return;
+    if (piece === 'k' && !isValidKingSquare(square, myColor)) return;
     
     const counts: Record<PieceType, number> = { p: 0, r: 0, n: 0, b: 0, q: 0, k: 0 };
     for (const p of placement) counts[p.type]++;
     const maxCounts: Record<PieceType, number> = { p: 8, r: 2, n: 2, b: 2, q: 1, k: 1 };
-    if (counts[piece] >= maxCounts[piece]) {
-      console.log('Max pieces reached for', piece);
-      return;
-    }
+    if (counts[piece] >= maxCounts[piece]) return;
     
     const newPiece: PlacedPiece = { type: piece, square, color: myColor };
     const newPlacement = [...placement, newPiece];
     
-    console.log('Placing piece, new placement:', newPlacement);
-    
     if (myColor === 'w') store.setPlacement('w', newPlacement);
     else store.setPlacement('b', newPlacement);
     
-    // Send to peer (host only sends to guest, guest sends to host)
+    // Send to peer
     sendToPeer('placement', { color: myColor, pieces: newPlacement });
-    
-    // Update eval (only show during placement)
-    if (isPlacingPhase) {
-      setEvalLabel('Your Formation');
-      const pieceValues: Record<string, number> = { p: 100, n: 320, b: 330, r: 500, q: 900, k: 0 };
-      let eval_ = 0;
-      for (const p of newPlacement) {
-        eval_ += myColor === 'w' ? (pieceValues[p.type] || 0) : -(pieceValues[p.type] || 0);
-      }
-      setCurrentEval(eval_);
-    }
   };
 
   // Handle commander pick
@@ -417,7 +393,14 @@ export default function App() {
         const state = useGameStore.getState();
         console.log('Commander picks:', state.whiteCommanderPick, state.blackCommanderPick);
         if (state.whiteCommanderPick && state.blackCommanderPick) {
-          console.log('Both commanders picked, starting auto-play');
+          console.log('Both commanders picked, building FEN and starting auto-play');
+          // Build FEN from placement if not already built
+          if (!state.currentFen) {
+            const fen = buildFenFromPlacement(state.whitePlacement, state.blackPlacement, true);
+            store.setCurrentFen(fen);
+            sendToPeer('reveal', { fen });
+            console.log('Built FEN:', fen);
+          }
           startAutoPlay();
         }
       }, 500);
@@ -837,7 +820,11 @@ export default function App() {
 
             {/* Board with eval bar */}
             <div className="flex gap-2 items-stretch">
-              {store.phase === 'AUTO_PLAY' && <EvalBar eval={currentEval} label={evalLabel} />}
+              <EvalBar 
+                eval={currentEval} 
+                label={evalLabel} 
+                locked={store.phase !== 'AUTO_PLAY' && store.phase !== 'ROUND_RESULT'}
+              />
               <div className="flex flex-col items-center">
                 <Board
                   fen={store.phase === 'AUTO_PLAY' || store.phase === 'ROUND_RESULT' ? store.currentFen : undefined}

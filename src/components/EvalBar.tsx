@@ -4,18 +4,32 @@ import { formatEval } from '../engine/heuristic';
 interface EvalBarProps {
   eval: number; // centipawns from white's perspective
   label: string;
-  animated?: boolean;
+  locked?: boolean;
 }
 
-export const EvalBar: React.FC<EvalBarProps> = ({ eval: evalCp, label, animated = true }) => {
+export const EvalBar: React.FC<EvalBarProps> = ({ eval: evalCp, label, locked = false }) => {
+  if (locked) {
+    return (
+      <div className="flex flex-col items-center h-full">
+        <div className="text-[10px] text-gray-500 mb-1 text-center font-medium uppercase tracking-wider">
+          {label}
+        </div>
+        <div className="relative w-6 flex-1 bg-gray-800 rounded-full overflow-hidden border border-gray-600">
+          <div className="absolute inset-0 flex items-center justify-center">
+            <span className="text-[9px] text-gray-500">🔒</span>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   // Convert eval to percentage (clamp between 0 and 100)
-  // Use a sigmoid-like function for better visualization
   const normalized = Math.max(-1000, Math.min(1000, evalCp));
-  const whitePercent = 50 + (normalized / 1000) * 45; // 5% to 95% range
+  const whitePercent = 50 + (normalized / 1000) * 45;
 
   return (
     <div className="flex flex-col items-center h-full">
-      <div className="text-[10px] text-gray-400 mb-1 text-center font-medium uppercase tracking-wider writing-mode-vertical">
+      <div className="text-[10px] text-gray-400 mb-1 text-center font-medium uppercase tracking-wider">
         {label}
       </div>
       <div className="relative w-6 flex-1 bg-gray-800 rounded-full overflow-hidden border border-gray-600">
@@ -23,7 +37,7 @@ export const EvalBar: React.FC<EvalBarProps> = ({ eval: evalCp, label, animated 
         <div className="absolute bottom-0 w-full bg-gray-900" style={{ height: `${100 - whitePercent}%` }} />
         {/* White portion (top) */}
         <div 
-          className={`absolute top-0 w-full bg-white ${animated ? 'transition-all duration-500 ease-out' : ''}`}
+          className="absolute top-0 w-full bg-white transition-all duration-500 ease-out"
           style={{ height: `${whitePercent}%` }}
         />
         {/* Center line */}
@@ -38,10 +52,6 @@ export const EvalBar: React.FC<EvalBarProps> = ({ eval: evalCp, label, animated 
             {formatEval(evalCp)}
           </span>
         </div>
-      </div>
-      {/* Side labels */}
-      <div className="flex flex-col items-center mt-1">
-        <span className="text-[8px] text-gray-500">B</span>
       </div>
     </div>
   );
