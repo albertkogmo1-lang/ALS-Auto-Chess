@@ -6,9 +6,10 @@ import { formatEval } from '../engine/heuristic';
 interface RoundRecapProps {
   result: RoundResult;
   onContinue: () => void;
+  showContinue?: boolean;
 }
 
-export const RoundRecap: React.FC<RoundRecapProps> = ({ result, onContinue }) => {
+export const RoundRecap: React.FC<RoundRecapProps> = ({ result, onContinue, showContinue = true }) => {
   const whiteCmd = getCommanderById(result.whiteCommanderId);
   const blackCmd = getCommanderById(result.blackCommanderId);
   
@@ -67,12 +68,19 @@ export const RoundRecap: React.FC<RoundRecapProps> = ({ result, onContinue }) =>
           </div>
         </div>
 
-        <button
-          onClick={onContinue}
-          className="w-full py-3 bg-indigo-600 hover:bg-indigo-500 text-white font-bold rounded-lg transition-colors"
-        >
-          Continue →
-        </button>
+        {showContinue && (
+          <button
+            onClick={onContinue}
+            className="w-full py-3 bg-indigo-600 hover:bg-indigo-500 text-white font-bold rounded-lg transition-colors"
+          >
+            Continue →
+          </button>
+        )}
+        {!showContinue && (
+          <div className="text-center text-gray-400 text-sm">
+            Waiting for host to continue...
+          </div>
+        )}
       </div>
     </div>
   );
